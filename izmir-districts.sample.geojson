@@ -1,0 +1,11 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    { "type": "Feature", "properties": { "id": 1, "name": "Konak" },
+      "geometry": { "type": "Polygon", "coordinates": [[[27.10,38.42],[27.15,38.42],[27.15,38.39],[27.10,38.39],[27.10,38.42]]] } },
+    { "type": "Feature", "properties": { "id": 2, "name": "Karsiyaka" },
+      "geometry": { "type": "Polygon", "coordinates": [[[27.07,38.47],[27.12,38.47],[27.12,38.44],[27.07,38.44],[27.07,38.47]]] } },
+    { "type": "Feature", "properties": { "id": 3, "name": "Bornova" },
+      "geometry": { "type": "Polygon", "coordinates": [[[27.20,38.48],[27.27,38.48],[27.27,38.44],[27.20,38.44],[27.20,38.48]]] } }
+  ]
+}
