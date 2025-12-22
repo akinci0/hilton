@@ -1,7 +1,7 @@
 // src/lib/api.js
 const BASE_URL = "http://localhost:5001"; 
 
-// 1. ŞUBE LİSTESİ VE HARİTA (Eksikti, eklendi)
+// 1. ŞUBE LİSTESİ VE HARİTA 
 export async function fetchDistricts() {
   try {
     const res = await fetch(`${BASE_URL}/api/dashboard/districts`);

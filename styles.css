@@ -428,4 +428,35 @@ body {
   font-family: 'Inter', sans-serif;
   background-color: #0f172a; /* Daha derin, profesyonel bir arka plan rengi */
   color: #f8fafc;
+}/* Ana kapsayıcı (Navbar hariç tüm alan) */
+.dashboard-container {
+  /* Ekranın tamamı eksi Navbar yüksekliği (tahminen 60-80px) */
+  height: calc(100vh - 80px); 
+  padding: 10px;
+  
+  /* Izgara Sistemi */
+  display: grid;
+  grid-template-columns: 1fr 1fr; /* 2 Sütun */
+  grid-template-rows: 1fr 1fr;    /* 2 Satır */
+  gap: 15px; /* Grafikler arası boşluk */
+  overflow: hidden; /* Scrollu engelle */
+}
+
+/* Grafik Kutuları */
+.chart-box {
+  background-color: #1e293b; /* Senin koyu arka plan rengin */
+  border-radius: 12px;
+  padding: 10px;
+  width: 100%;
+  height: 100%; /* Kendi hücresini tamamen kaplasın */
+  
+  /* İçerik düzeni */
+  display: flex;
+  flex-direction: column;
+}
+
+/* Grafiğin kendisi (Canvas veya SVG) */
+.chart-content {
+  flex-grow: 1; /* Başlık hariç kalan alanı kapla */
+  min-height: 0; /* Flexbox içinde taşmayı önlemek için kritik */
 }

@@ -4,10 +4,8 @@ import DistrictList from "../components/DistrictList.jsx";
 import ChartsPanel from "../components/ChartsPanel.jsx";
 import { fetchDistricts, fetchSummary, fetchDistrictTrends, fetchKdsData } from "../lib/api";
 
-// Logo'nun src/assets içinde olduğunu varsayıyoruz
 import hiltonLogo from './hilton.png'; 
 
-// İstatik Kartı Bileşeni
 function StatCard({ title, value, foot, icon }) {
   return (
     <div className="card statCard">
@@ -23,44 +21,31 @@ function StatCard({ title, value, foot, icon }) {
 
 export default function Dashboard({ onLogout }) {
   
-  // --- STATE TANIMLARI ---
+  // 1. DEĞİŞİKLİK: Başlangıç değeri 'null' yapıldı (Artık Çeşme seçili gelmeyecek)
   const [districts, setDistricts] = useState([]);
-  const [selectedDistrictId, setSelectedDistrictId] = useState(5); // Varsayılan: Çeşme
-  const [selectedPeriod, setSelectedPeriod] = useState(6); // Varsayılan: 6 Ay
+  const [selectedDistrictId, setSelectedDistrictId] = useState(null); 
+  const [selectedPeriod, setSelectedPeriod] = useState(6); 
   
-  // Grafik Verileri
   const [kdsData, setKdsData] = useState([]);     
   const [trendData, setTrendData] = useState([]); 
   const [summary, setSummary] = useState(null);
   
-  // UI State
   const [error, setError] = useState("");
   const [tab, setTab] = useState("map");
 
-  // --- YENİ EKLENEN: EXCEL (CSV) İNDİRME FONKSİYONU ---
   const handleDownloadExcel = () => {
-    // 1. Başlık Satırı
     let csvContent = "Şube Adı;Doluluk Oranı (%);Performans Puanı;Durum\n";
-
-    // 2. Verileri Döngüye Alıp Satır Satır Ekleme
     districts.forEach(d => {
       const score = Number(d.score || 0);
       let statusLabel = "Düşük";
       if (score >= 4.7) statusLabel = "Mükemmel";
       else if (score >= 4.5) statusLabel = "İyi";
       else if (score >= 4.0) statusLabel = "Orta";
-
-      // Excel'in sütunları ayırması için noktalı virgül (;) kullanıyoruz
-      // Türkçe Excel versiyonları genelde virgül yerine noktalı virgül sever.
       const row = `"${d.name}";${Math.round(d.occupancy)};${score.toFixed(1)};"${statusLabel}"`;
       csvContent += row + "\n";
     });
-
-    // 3. Dosyayı Oluşturma (Türkçe karakterler için BOM \uFEFF ekliyoruz)
     const BOM = "\uFEFF";
     const blob = new Blob([BOM + csvContent], { type: "text/csv;charset=utf-8;" });
-    
-    // 4. İndirme Linki Oluşturup Tıklama
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -70,7 +55,6 @@ export default function Dashboard({ onLogout }) {
     document.body.removeChild(link);
   };
 
-  // --- EFFECT 1: Sayfa İlk Açıldığında ---
   useEffect(() => {
     async function loadInitialData() {
       try {
@@ -78,10 +62,10 @@ export default function Dashboard({ onLogout }) {
         setDistricts(d);
         const s = await fetchSummary();
         setSummary(s);
+        
+        // 2. DEĞİŞİKLİK: Otomatik seçim kodu kaldırıldı.
+        // if (!selectedDistrictId && d.length > 0) { setSelectedDistrictId(d[0].districtId); } -> SİLİNDİ
 
-        if (!selectedDistrictId && d.length > 0) {
-           setSelectedDistrictId(d[0].districtId); 
-        }
       } catch (err) {
         console.error("Başlangıç verisi hatası:", err);
         setError("Veri yüklenirken hata oluştu.");
@@ -90,7 +74,6 @@ export default function Dashboard({ onLogout }) {
     loadInitialData();
   }, []);
 
-  // --- EFFECT 2: İlçe veya Periyot Değişince ---
   useEffect(() => {
     if (!selectedDistrictId) return;
 
@@ -108,7 +91,6 @@ export default function Dashboard({ onLogout }) {
     loadDetails();
   }, [selectedDistrictId, selectedPeriod]);
 
-  // Seçili ilçeyi bul
   const selected = useMemo(
     () => districts.find((d) => Number(d.districtId) === Number(selectedDistrictId)),
     [districts, selectedDistrictId]
@@ -123,37 +105,22 @@ export default function Dashboard({ onLogout }) {
 
   return (
     <div className="container">
-      {/* HEADER ALANI */}
       <div className="headerRow">
         <img
           src={hiltonLogo}
           alt="Hilton Logo"
-          style={{
-            width: '120px', 
-            height: 'auto', 
-            marginRight: '15px',
-          }}
+          style={{ width: '120px', height: 'auto', marginRight: '15px' }}
         />
-
         <div>
           <h1 className="hTitle">Hilton Hotel İzmir</h1>
           <p className="hSub">Personel Karar Destek Sistemi</p>
         </div>
-
         {error ? <span className="errText">{error}</span> : null}
-
-        {/* --- ÇIKIŞ YAP BUTONU --- */}
         <button 
           onClick={onLogout}
           style={{
-            padding: "8px 16px",
-            backgroundColor: "#ef4444",
-            color: "white",
-            border: "none",
-            borderRadius: "8px",
-            cursor: "pointer",
-            fontWeight: "bold",
-            marginLeft: "auto",
+            padding: "8px 16px", backgroundColor: "#ef4444", color: "white", border: "none",
+            borderRadius: "8px", cursor: "pointer", fontWeight: "bold", marginLeft: "auto",
             boxShadow: "0 2px 5px rgba(0,0,0,0.2)"
           }}
         >
@@ -161,7 +128,6 @@ export default function Dashboard({ onLogout }) {
         </button>
       </div>
 
-      {/* İSTATİSTİK KARTLARI */}
       <div className="statsGrid">
         <StatCard title="Toplam Gelir (Yıllık)" value={cards.totalRevenue} foot="Geçen yıla göre +%12" icon="$" />
         <StatCard title="Ortalama Doluluk" value={cards.avgOccupancy} foot="Sezon ortalaması" icon="↗" />
@@ -169,7 +135,6 @@ export default function Dashboard({ onLogout }) {
         <StatCard title="Toplam Personel" value={cards.totalStaff} foot="Şu an çalışan" icon="👤" />
       </div>
 
-      {/* TAB BUTONLARI */}
       <div className="tabsRow">
         <button className={`tabBtn ${tab === "map" ? "tabBtnActive" : ""}`} onClick={() => setTab("map")}>
           Yönetici Paneli (Harita)
@@ -179,12 +144,9 @@ export default function Dashboard({ onLogout }) {
         </button>
       </div>
 
-      {/* --- ANA İÇERİK DEĞİŞİMİ --- */}
       {tab === "map" ? (
-        // === 1. SEKME: HARİTA GÖRÜNÜMÜ ===
         <>
           <div className="mainGrid">
-            {/* SOL: HARİTA */}
             <div className="card panel">
               <h3 className="panelTitle">İzmir Haritası</h3>
               <div className="mapFrame">
@@ -195,8 +157,6 @@ export default function Dashboard({ onLogout }) {
                 />
               </div>
             </div>
-
-            {/* SAĞ: ŞUBE LİSTESİ */}
             <div className="card panel">
               <h3 className="panelTitle">Şubeler</h3>
               <p className="panelSub">Analiz için bir şube seçin</p>
@@ -210,17 +170,53 @@ export default function Dashboard({ onLogout }) {
             </div>
           </div>
 
-          {/* ALT: DETAY GRAFİKLERİ */}
           <div style={{ marginTop: "14px" }}>
             {selected ? (
               <>
-                <div className="card panel" style={{borderBottomLeftRadius:0, borderBottomRightRadius:0, paddingBottom:0, borderBottom:'none'}}>
-                    <h3 className="panelTitle" style={{ fontSize: '20px', color:'#f0e6e4' }}>
-                    {selected.name} Şubesi - Stratejik Planlama
-                    </h3>
-                    <p className="panelSub">
-                    Canlı veriler ve geçmiş dönem analizleri.
-                    </p>
+                {/* --- SEÇİM YAPILDIĞINDA GÖRÜNECEK ALAN --- */}
+                <div className="card panel" style={{
+                    borderBottomLeftRadius: 0,
+                    borderBottomRightRadius: 0,
+                    paddingBottom: 16,
+                    borderBottom: 'none',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                }}>
+                    <div>
+                        <h3 className="panelTitle" style={{ fontSize: '20px', color: '#f0e6e4', display:'flex', alignItems:'center', gap:'8px' }}>
+                           📍 {selected.name} Şubesi - Stratejik Planlama
+                        </h3>
+                        <p className="panelSub" style={{ margin: '4px 0 0 0' }}>
+                           Canlı veriler ve geçmiş dönem analizleri.
+                        </p>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: 'rgba(255,255,255,0.03)', padding:'6px 12px', borderRadius:'10px', border:'1px solid rgba(255,255,255,0.05)' }}>
+                        <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>Şube Seç:</span>
+                        <select
+                            value={selectedDistrictId}
+                            onChange={(e) => setSelectedDistrictId(Number(e.target.value))}
+                            style={{
+                                backgroundColor: 'transparent',
+                                color: '#f8fafc',
+                                border: 'none',
+                                fontSize: '14px',
+                                fontWeight: '700',
+                                cursor: 'pointer',
+                                outline: 'none',
+                                minWidth: '120px'
+                            }}
+                        >
+                            {districts.map((d) => (
+                                <option key={d.districtId} value={d.districtId} style={{ backgroundColor: '#0f172a', color: '#f8fafc' }}>
+                                    {d.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
                 
                 <ChartsPanel 
@@ -231,26 +227,36 @@ export default function Dashboard({ onLogout }) {
                 />
               </>
             ) : (
-              <div className="card panel" style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "250px", opacity: 0.7, textAlign: "center" }}>
-                <div style={{ fontWeight: "700", fontSize: "16px", marginBottom: "4px" }}>
-                  Veriler Yükleniyor...
-                </div>
+              // --- 3. DEĞİŞİKLİK: SEÇİM YAPILMADIĞINDA GÖRÜNECEK ŞIK "BOŞ DURUM" EKRANI ---
+              <div className="card panel" style={{ 
+                  display: "flex", 
+                  flexDirection: "column", 
+                  alignItems: "center", 
+                  justifyContent: "center", 
+                  minHeight: "350px", 
+                  textAlign: "center",
+                  borderStyle: "dashed",
+                  borderColor: "rgba(255,255,255,0.15)",
+                  background: "rgba(30, 41, 59, 0.3)" 
+              }}>
+                <div style={{ fontSize: "48px", marginBottom: "16px", opacity: 0.8 }}>🗺️</div>
+                <h3 style={{ margin: "0 0 8px 0", color: "#f8fafc", fontSize:'18px' }}>Henüz Bir Şube Seçilmedi</h3>
+                <p style={{ margin: 0, color: "#94a3b8", fontSize: "14px", maxWidth: "450px", lineHeight:"1.5" }}>
+                  Stratejik analizleri, personel simülasyonunu ve risk raporlarını görüntülemek için lütfen yukarıdaki <strong>Harita</strong> veya <strong>Şube Listesi</strong> üzerinden bir seçim yapınız.
+                </p>
               </div>
             )}
           </div>
         </>
       ) : (
-        // === 2. SEKME: DETAYLI TABLO GÖRÜNÜMÜ ===
         <div className="card panel">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
             <h3 className="panelTitle">Tüm Şubeler Detaylı Liste</h3>
-            
-            {/* EXCEL İNDİR BUTONU - ARTIK ÇALIŞIYOR */}
             <button 
               onClick={handleDownloadExcel}
               style={{ 
                 padding: "8px 16px", 
-                background: "#10b981", // Yeşil renk (Excel'i çağrıştırır) 
+                background: "#10b981", 
                 color: "#fff", 
                 border: "none", 
                 borderRadius: "6px", 
@@ -265,7 +271,6 @@ export default function Dashboard({ onLogout }) {
               📥 Excel İndir
             </button>
           </div>
-
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", color: "#cbd5e1", fontSize: "14px", textAlign: "left" }}>
               <thead>
@@ -290,9 +295,7 @@ export default function Dashboard({ onLogout }) {
                         onMouseOver={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.05)"}
                         onMouseOut={(e) => e.currentTarget.style.background = "transparent"}
                     >
-                      <td style={{ padding: "16px", fontWeight: "600", color: "#f8fafc" }}>
-                        {d.name}
-                      </td>
+                      <td style={{ padding: "16px", fontWeight: "600", color: "#f8fafc" }}>{d.name}</td>
                       <td style={{ padding: "16px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                           <div style={{ width: "100px", height: "6px", background: "#334155", borderRadius: "3px", overflow: "hidden" }}>
@@ -301,18 +304,9 @@ export default function Dashboard({ onLogout }) {
                           <span>%{Math.round(d.occupancy)}</span>
                         </div>
                       </td>
-                      <td style={{ padding: "16px", fontWeight: "bold" }}>
-                        {Number(d.score).toFixed(1)} / 5.0
-                      </td>
+                      <td style={{ padding: "16px", fontWeight: "bold" }}>{Number(d.score).toFixed(1)} / 5.0</td>
                       <td style={{ padding: "16px" }}>
-                        <span style={{ 
-                          padding: "4px 10px", 
-                          borderRadius: "6px", 
-                          background: status.bg, 
-                          color: status.color, 
-                          fontSize: "12px", 
-                          fontWeight: "700" 
-                        }}>
+                        <span style={{ padding: "4px 10px", borderRadius: "6px", background: status.bg, color: status.color, fontSize: "12px", fontWeight: "700" }}>
                           {status.label}
                         </span>
                       </td>

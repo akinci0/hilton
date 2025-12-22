@@ -1,34 +1,42 @@
 import React, { useState, useMemo, useRef } from "react";
 import {
-  LineChart, Line, BarChart, Bar, ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, 
-  Tooltip, ResponsiveContainer, Legend, ReferenceLine, Cell
+  LineChart, Line, BarChart, Bar, ScatterChart, Scatter, PieChart, Pie, Cell, XAxis, YAxis, ZAxis, CartesianGrid, 
+  Tooltip, ResponsiveContainer, Legend, ReferenceLine
 } from "recharts";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
+import regression from 'regression'; 
 
-// --- TASARIM SABİTLERİ (THEME) ---
+// --- TASARIM SABİTLERİ ---
 const THEME = {
   colors: {
-    primary: "#3b82f6",   // Mavi
-    danger: "#ef4444",    // Kırmızı
-    success: "#10b981",   // Yeşil
-    warning: "#f59e0b",   // Turuncu
-    textMain: "#f8fafc",  // Beyazımsı
-    textSub: "#94a3b8",   // Gri
-    bgDark: "#0f172a",    // Arkaplan
-    cardBg: "#1e293b",    // Kart Rengi
-    border: "#334155",    // Kenarlık
+    primary: "#3b82f6",   
+    danger: "#ef4444",    
+    success: "#10b981",   
+    warning: "#f59e0b",   
+    purple: "#8b5cf6",
+    idle:   "#94a3b8",    
+    overtime: "#f97316",  
+    ai:     "#d946ef",    
+    textMain: "#f8fafc",  
+    textSub: "#94a3b8",   
+    bgDark: "#0f172a",    
+    cardBg: "#1e293b",    
+    border: "#334155",    
   },
   cardStyle: {
     backgroundColor: "#1e293b",
-    borderRadius: "16px",
+    borderRadius: "12px",
     border: "1px solid #334155",
-    boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
-    padding: "24px",
-    marginBottom: "20px"
+    boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+    padding: "12px",
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    minHeight: 0
   },
-  titleStyle: {fontSize: "18px", fontWeight: "700", color: "#f8fafc", marginBottom: "6px", letterSpacing:"-0.025em"},
-  subTitleStyle: {fontSize: "13px", color: "#94a3b8", fontWeight: "500", lineHeight: "1.4"}
+  titleStyle: {fontSize: "15px", fontWeight: "700", color: "#f8fafc", marginBottom: "2px", letterSpacing:"-0.025em"},
+  subTitleStyle: {fontSize: "11px", color: "#94a3b8", fontWeight: "500", lineHeight: "1.2"}
 };
 
 // TARİH ÇEVİRİSİ
@@ -49,122 +57,226 @@ const translateDate = (dateStr) => {
 // SLIDER STİLİ
 const sliderStyles = `
   .kds-range-input { -webkit-appearance: none; width: 100%; height: 6px; background: #334155; border-radius: 3px; outline: none; }
-  .kds-range-input::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; cursor: pointer; transition: all 0.2s; border: 2px solid #1e293b; }
+  .kds-range-input::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; cursor: pointer; transition: all 0.2s; border: 2px solid #1e293b; }
   .thumb-danger::-webkit-slider-thumb { background: ${THEME.colors.danger}; box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2); }
   .thumb-primary::-webkit-slider-thumb { background: ${THEME.colors.primary}; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2); }
   .thumb-success::-webkit-slider-thumb { background: ${THEME.colors.success}; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2); }
+  .thumb-warning::-webkit-slider-thumb { background: ${THEME.colors.warning}; box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.2); }
+  .thumb-ai::-webkit-slider-thumb { background: ${THEME.colors.ai}; box-shadow: 0 0 0 6px rgba(217, 70, 239, 0.2); border: 2px solid #fff; } 
+  .custom-scroll::-webkit-scrollbar { width: 6px; }
+  .custom-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.02); }
+  .custom-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
 `;
 
-// TOOLTIP
+// TOOLTIP BİLEŞENİ
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     const isScatter = payload[0].payload.z !== undefined;
-    const displayLabel = isScatter ? payload[0].payload.name : translateDate(label);
+    const isPie = payload[0].name !== undefined && !label;
+    const displayLabel = isScatter || isPie ? payload[0].payload.name : translateDate(label);
+
+    const getLabelName = (key) => {
+      switch(key) {
+        case 'x': return 'Fazla Mesai (Saat)';
+        case 'y': return 'İstifa Oranı (%)';
+        case 'z': return 'Personel Sayısı';
+        case 'revenue': return 'Gelir';
+        case 'occupancy': return 'Doluluk';
+        case 'productivity': return 'Verimlilik';
+        case 'normal': return 'Normal Mesai';
+        case 'overtime': return 'Fazla Mesai (Risk)';
+        case 'value': return 'Tutar';
+        case 'totalBudget': return 'Bütçe';
+        default: return key;
+      }
+    };
 
     return (
-      <div style={{ backgroundColor: "rgba(15, 23, 42, 0.95)", border: `1px solid ${THEME.colors.border}`, padding: "16px", borderRadius: "12px", boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)", backdropFilter: "blur(8px)", minWidth:"200px" }}>
-        <p style={{ color: THEME.colors.textMain, marginBottom: "12px", fontSize:"14px", fontWeight:"700", borderBottom:`1px solid ${THEME.colors.border}`, paddingBottom:'8px' }}>
+      <div style={{ backgroundColor: "rgba(15, 23, 42, 0.95)", border: `1px solid ${THEME.colors.border}`, padding: "12px", borderRadius: "8px", boxShadow: "0 10px 15px -5px rgba(0, 0, 0, 0.5)", backdropFilter: "blur(8px)", minWidth:"180px", zIndex: 100 }}>
+        <p style={{ color: THEME.colors.textMain, marginBottom: "8px", fontSize:"13px", fontWeight:"700", borderBottom:`1px solid ${THEME.colors.border}`, paddingBottom:'4px' }}>
           {displayLabel}
         </p>
         {payload.map((p, idx) => (
-          <div key={idx} style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px', fontSize:"13px" }}>
-            <div style={{width:8, height:8, borderRadius:'50%', backgroundColor: p.color || p.payload.fill}}></div>
-            <span style={{color: THEME.colors.textSub}}>{p.name}:</span>
+          <div key={idx} style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'4px', fontSize:"12px" }}>
+            <div style={{width:6, height:6, borderRadius:'50%', backgroundColor: p.color || p.payload.fill}}></div>
+            <span style={{color: THEME.colors.textSub}}>{getLabelName(p.name)}:</span>
             <span style={{ fontWeight: "700", color: THEME.colors.textMain, marginLeft:'auto' }}>
-              {p.dataKey === 'revenue' ? `₺${Number(p.value).toLocaleString()}` : p.value}
+              {p.dataKey === 'revenue' || p.name === 'value' || p.name === 'totalBudget' || p.unit === '₺' ? `₺${Number(p.value).toLocaleString()}` : p.value}
               {p.dataKey === 'occupancy' ? '%' : ''}
-              {p.name.includes('Saat') ? ' sa' : ''}
-              {p.name.includes('Oranı') ? '%' : ''}
             </span>
           </div>
         ))}
-        {isScatter && (
-           <div style={{marginTop:'8px', fontSize:'12px', color:THEME.colors.warning, fontStyle:'italic'}}>
-             Risk Seviyesi: {payload[0].payload.risk}
-           </div>
-        )}
       </div>
     );
   }
   return null;
 };
 
+const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+const COST_COLORS = [THEME.colors.primary, THEME.colors.idle, THEME.colors.overtime];
+
 export default function ChartsPanel({ trendData, kdsData, selectedPeriod, onPeriodChange }) {
   const chartData = trendData || [];
   const rawKdsData = kdsData || []; 
 
-  const simulationRef = useRef(null);
+  const reportRef = useRef(null); 
+
+  const [simMode, setSimMode] = useState('recruitment'); 
+
+  // --- PARAMETRELER ---
+  const [occScenario, setOccScenario] = useState(0); 
+  const [avgCost, setAvgCost] = useState(35000);
+  const [prodTarget, setProdTarget] = useState(100); 
+  const [flexibleRatio, setFlexibleRatio] = useState(10); 
+  const [overtimeMultiplier, setOvertimeMultiplier] = useState(1.5); 
+  
+  // AI State
+  const [aiPrediction, setAiPrediction] = useState(null); 
+  const [isAiActive, setIsAiActive] = useState(false);    
+
+  // --- YAPAY ZEKA TAHMİN (6 AY / SEZON) ---
+  const handleAiPredict = () => {
+    if (!chartData || chartData.length === 0) { alert("Tahmin için veri yok."); return; }
+
+    const cleanData = chartData.map((d) => Number(d.occupancy)).filter((val) => !isNaN(val) && val > 0);
+    if (cleanData.length < 3) { alert("Yetersiz veri."); return; }
+
+    const dataPoints = cleanData.map((val, index) => [index, val]);
+    const result = regression.linear(dataPoints);
+    
+    const lastIndex = dataPoints.length - 1;
+    const futureIndex = lastIndex + 6; // 6 Ay Sonrası
+    const prediction = result.predict(futureIndex);
+    
+    let predictedOccupancy = Math.min(100, Math.max(0, prediction[1]));
+    const currentOccupancy = cleanData[cleanData.length - 1];
+    
+    // Güvenlik: Eğer veri saçmalarsa (0 gibi), son veriden %5 artır.
+    if (predictedOccupancy < 5 && currentOccupancy > 20) { predictedOccupancy = currentOccupancy * 1.05; }
+
+    const diff = predictedOccupancy - currentOccupancy;
+    const recommendedScenario = Math.round(diff);
+
+    setOccScenario(recommendedScenario);
+    setIsAiActive(true);
+    
+    const confidenceLevel = result.r2 > 0.7 ? "Yüksek" : result.r2 > 0.4 ? "Orta" : "Düşük";
+
+    setAiPrediction({
+      nextVal: predictedOccupancy.toFixed(1),
+      change: recommendedScenario,
+      confidence: confidenceLevel,
+      horizon: "Gelecek Sezon (6 Ay)"
+    });
+
+    setTimeout(() => setIsAiActive(false), 4000);
+  };
 
   const handleDownloadPDF = async () => {
-    if (!simulationRef.current) return;
+    if (!reportRef.current) return;
     try {
-      const canvas = await html2canvas(simulationRef.current, {
-        scale: 2, 
-        backgroundColor: THEME.colors.cardBg 
-      });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('l', 'mm', 'a4');
+      const canvas = await html2canvas(reportRef.current, { scale: 2, backgroundColor: "#ffffff" });
+      const imgData = canvas.toDataURL('image/jpeg', 1.0);
+      const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const imgProps = pdf.getImageProperties(imgData);
       const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
-
-      pdf.setFontSize(14);
-      pdf.text("Hilton Izmir - Stratejik Personel Planlama Raporu", 10, 10);
-      pdf.setFontSize(10);
-      pdf.text(`Rapor Tarihi: ${new Date().toLocaleDateString()}`, 10, 16);
-      pdf.addImage(imgData, 'PNG', 0, 20, pdfWidth, imgHeight);
-      pdf.save(`Hilton_KDS_Rapor_${new Date().toISOString().slice(0,10)}.pdf`);
-
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, imgHeight);
+      pdf.save(`Hilton_KDS_${simMode}_Raporu.pdf`);
     } catch (err) {
       console.error("PDF Hatası:", err);
-      alert("Rapor oluşturulurken bir hata oluştu.");
     }
   };
 
   const isLoading = rawKdsData.length === 0 && chartData.length === 0;
-  const safeKdsData = rawKdsData.length > 0 ? rawKdsData : [
-    { name: "...", mevcut: 0, baseOneri: 0, overtime: 0, turnover: 0, z:0, risk:"-" }
-  ];
+  const safeKdsData = rawKdsData.length > 0 ? rawKdsData : [{ name: "...", mevcut: 0, baseOneri: 0, overtime: 0, turnover: 0, z:0, risk:"-" }];
 
-  const [occScenario, setOccScenario] = useState(0); 
-  const [prodTarget, setProdTarget] = useState(100); 
-  const [avgCost, setAvgCost] = useState(35000);
-
-  const simulatedDeptData = useMemo(() => {
-    return safeKdsData.map(dept => {
+  // --- SİMÜLASYON 1: İŞE ALIM & KALİTE ---
+  const recruitmentSim = useMemo(() => {
+    let totalMevcut = 0;
+    const depts = safeKdsData.map(dept => {
       const occFactor = 1 + (occScenario / 100);
       const prodFactor = prodTarget / 100;
       const newOneri = Math.ceil((dept.baseOneri * occFactor) / prodFactor);
-      return { ...dept, onerilen: newOneri, gap: newOneri - dept.mevcut };
+      const gap = newOneri - dept.mevcut;
+      totalMevcut += dept.mevcut;
+      return { ...dept, onerilen: newOneri, gap: gap, totalBudget: newOneri * avgCost };
     });
-  }, [occScenario, prodTarget, safeKdsData]);
+    
+    return { depts, totalMevcut };
+  }, [occScenario, prodTarget, safeKdsData, avgCost]);
+
+  const totalGap = recruitmentSim.depts.reduce((acc, curr) => acc + curr.gap, 0);
+  const isHiring = totalGap >= 0;
+  const gapValue = Math.abs(totalGap);
+  const estCost = gapValue * avgCost;
+
+  // *** HİZMET KALİTESİ HESABI (YENİ) ***
+  // Mantık: Eğer personel eksiği varsa (Gap > 0), mevcut personel üzerine yük biner ve kalite düşer.
+  // Eksiğin toplam kadroya oranına göre puan kırılır.
+  const workloadStress = isHiring ? (gapValue / recruitmentSim.totalMevcut) * 100 : 0;
+  const serviceQualityScore = Math.max(0, 100 - (workloadStress * 2.5)); // Çarpan 2.5 (Hassasiyet)
+  
+  let qualityColor = THEME.colors.success;
+  let qualityText = "Mükemmel";
+  if (serviceQualityScore < 85) { qualityColor = THEME.colors.warning; qualityText = "Riskli"; }
+  if (serviceQualityScore < 70) { qualityColor = THEME.colors.danger; qualityText = "Kritik Düşüş"; }
+
+
+  // --- SİMÜLASYON 2: MALİYET VE ESNEKLİK ---
+  const costSim = useMemo(() => {
+    let totalBaseCost = 0, totalIdleCost = 0, totalOvertimeCost = 0, totalSaved = 0;
+    const details = safeKdsData.map(dept => {
+      const occFactor = 1 + (occScenario / 100);
+      const needed = Math.ceil(dept.baseOneri * occFactor);
+      const current = dept.mevcut;
+      const gap = needed - current;
+      const hourlyRate = avgCost / 160;
+      let status = "";
+      
+      if (gap < 0) { 
+        const idleCount = Math.abs(gap);
+        const savedCount = idleCount * (flexibleRatio / 100); 
+        const realIdleCount = idleCount - savedCount;
+        const idleCost = realIdleCount * avgCost;
+        const savedCost = savedCount * avgCost;
+        const baseCost = (current - idleCount) * avgCost;
+        totalBaseCost += baseCost; totalIdleCost += idleCost; totalSaved += savedCost;
+        status = "Atıl";
+      } else if (gap > 0) { 
+        const totalMissingHours = gap * 160;
+        const partTimeHours = totalMissingHours * (flexibleRatio / 100);
+        const partTimeCost = partTimeHours * hourlyRate;
+        const overtimeHours = totalMissingHours - partTimeHours;
+        const overtimeCost = overtimeHours * hourlyRate * overtimeMultiplier;
+        const costWithoutFlex = totalMissingHours * hourlyRate * overtimeMultiplier;
+        const actualCost = partTimeCost + overtimeCost;
+        totalSaved += (costWithoutFlex - actualCost);
+        totalBaseCost += (current * avgCost) + partTimeCost;
+        totalOvertimeCost += overtimeCost;
+        status = "Mesai";
+      } else {
+        totalBaseCost += current * avgCost; status = "OK";
+      }
+      return { ...dept, needed, gap, status };
+    });
+    const chartData = [
+      { name: 'Verimli', value: totalBaseCost, unit:'₺' },
+      { name: 'Atıl (İsraf)', value: totalIdleCost, unit:'₺' },
+      { name: 'Ekstra Mesai', value: totalOvertimeCost, unit:'₺' },
+    ];
+    return { details, chartData, totalSaved };
+  }, [occScenario, flexibleRatio, overtimeMultiplier, safeKdsData, avgCost]);
 
   const overtimeData = safeKdsData;
   const riskMatrixData = safeKdsData.map(d => ({
-    name: d.name,
-    x: d.overtime, 
-    y: d.turnover, 
-    z: d.z || 10,
-    risk: d.risk,
+    name: d.name, x: d.overtime, y: d.turnover, z: d.z || 10, risk: d.risk,
     fill: d.risk === 'KRİTİK' ? THEME.colors.danger : d.risk === 'YÜKSEK' ? THEME.colors.warning : THEME.colors.success
   }));
 
-  // --- HESAPLAMA MANTIĞI GÜNCELLENDİ ---
-  const totalGap = simulatedDeptData.reduce((acc, curr) => acc + (curr.onerilen - curr.mevcut), 0);
-  
-  // Pozitif ise (Alım Lazım), Negatif ise (Fazla Personel Var)
-  const isHiring = totalGap >= 0;
-  const gapValue = Math.abs(totalGap); // Ekrana hep pozitif sayı yazacağız
-  const estCost = gapValue * avgCost;
-
-  // Tasarım renklerini duruma göre değiştir
-  const statusColor = isHiring ? THEME.colors.danger : THEME.colors.success; // Alım=Kırmızı(Maliyet), Çıkarma=Yeşil(Tasarruf)
-  const statusBg = isHiring ? `${THEME.colors.danger}15` : `${THEME.colors.success}15`;
-  const statusBorder = isHiring ? THEME.colors.danger : THEME.colors.success;
-
   const commonGrid = <CartesianGrid strokeDasharray="3 3" stroke={THEME.colors.border} vertical={false} opacity={0.4} />;
-  const commonXAxis = <XAxis dataKey="name" stroke={THEME.colors.textSub} tick={{ fill: THEME.colors.textSub, fontSize: 12, fontWeight:500 }} tickLine={false} axisLine={false} dy={10} tickFormatter={translateDate} />;
-  const commonYAxis = <YAxis stroke={THEME.colors.textSub} tick={{ fill: THEME.colors.textSub, fontSize: 12, fontWeight:500 }} tickLine={false} axisLine={false} />;
+  const commonXAxis = <XAxis dataKey="name" stroke={THEME.colors.textSub} tick={{ fill: THEME.colors.textSub, fontSize: 10, fontWeight:500 }} tickLine={false} axisLine={false} dy={5} tickFormatter={translateDate} interval="preserveStartEnd" />;
+  const commonYAxis = <YAxis stroke={THEME.colors.textSub} tick={{ fill: THEME.colors.textSub, fontSize: 10, fontWeight:500 }} tickLine={false} axisLine={false} />;
 
   const chartGradients = (
     <defs>
@@ -176,233 +288,244 @@ export default function ChartsPanel({ trendData, kdsData, selectedPeriod, onPeri
   );
 
   const getBtnStyle = (period) => ({
-    padding: "4px 12px",
-    fontSize: "11px",
-    fontWeight: "600",
-    borderRadius: "6px",
-    cursor: "pointer",
-    border: "none",
-    transition: "all 0.2s",
-    backgroundColor: selectedPeriod === period ? THEME.colors.primary : "rgba(255,255,255,0.05)",
-    color: selectedPeriod === period ? "#fff" : THEME.colors.textSub,
-    marginLeft: "4px"
+    padding: "2px 8px", fontSize: "10px", fontWeight: "600", borderRadius: "4px", cursor: "pointer", border: "none",
+    transition: "all 0.2s", backgroundColor: selectedPeriod === period ? THEME.colors.primary : "rgba(255,255,255,0.05)",
+    color: selectedPeriod === period ? "#fff" : THEME.colors.textSub, marginLeft: "2px"
   });
 
-  if (isLoading) {
-    return (
-      <div style={{ padding: "40px", textAlign: "center", color: THEME.colors.textSub }}>
-        <div style={{ marginBottom: "10px", fontSize: "24px" }}>⏳</div>
-        <p>Veriler Analiz Ediliyor...</p>
-        <small>Lütfen bekleyiniz veya haritadan bir şube seçiniz.</small>
-      </div>
-    );
-  }
+  if (isLoading) return <div style={{ padding: "40px", textAlign: "center", color: THEME.colors.textSub }}>⏳ Veriler Yükleniyor...</div>;
 
   return (
-    <div style={{display:'flex', flexDirection:'column', gap:'24px', marginTop:'24px', fontFamily: "'Inter', sans-serif"}}>
+    <div style={{display:'grid', gridTemplateColumns: "2.8fr 1.2fr", gap:'12px', marginTop:'12px', fontFamily: "'Inter', sans-serif", height: "calc(100vh - 160px)", minHeight: "500px"}}>
       <style>{sliderStyles}</style>
       
-      {/* 1. BLOK: TRENDLER */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-        
-        {/* Gelir Grafiği */}
+      {/* SOL TARAF: GRAFİKLER */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: "12px", height: "100%" }}>
+        {/* 1. GELİR */}
         <div style={THEME.cardStyle}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "24px", alignItems:"center" }}>
-            <div>
-                <h3 style={THEME.titleStyle}>Gelir ve Doluluk Trendi</h3>
-                <p style={THEME.subTitleStyle}>Geçmiş ve Gelecek Dönem Analizi</p>
-            </div>
-            <div style={{ background: "rgba(0,0,0,0.2)", padding: "4px", borderRadius: "8px" }}>
-                <button onClick={() => onPeriodChange(6)} style={getBtnStyle(6)}>6 Ay</button>
-                <button onClick={() => onPeriodChange(12)} style={getBtnStyle(12)}>12 Ay</button>
-                <button onClick={() => onPeriodChange(18)} style={getBtnStyle(18)}>18 Ay</button>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px", alignItems:"center" }}>
+            <div><h3 style={THEME.titleStyle}>Gelir & Doluluk</h3></div>
+            <div style={{ background: "rgba(0,0,0,0.2)", padding: "2px", borderRadius: "6px" }}>
+              <button onClick={() => onPeriodChange(6)} style={getBtnStyle(6)}>6 Ay</button>
+              <button onClick={() => onPeriodChange(12)} style={getBtnStyle(12)}>12 Ay</button>
+              <button onClick={() => onPeriodChange(18)} style={getBtnStyle(18)}>18 Ay</button>
             </div>
           </div>
-          
-          <div style={{ width: "100%", height: 300 }}>
-             {chartData.length > 0 ? (
-                <ResponsiveContainer>
-                  <LineChart data={chartData}>
-                    {chartGradients}{commonGrid}{commonXAxis}
-                    <YAxis yAxisId="left" stroke={THEME.colors.textSub} tickFormatter={(val)=>`₺${val/1000}k`} tickLine={false} axisLine={false}/>
-                    <YAxis yAxisId="right" orientation="right" stroke={THEME.colors.textSub} tickLine={false} axisLine={false} unit="%" />
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend wrapperStyle={{ paddingTop: "10px" }} />
-                    <Line yAxisId="left" type="monotone" dataKey="revenue" name="Gelir" stroke={THEME.colors.danger} strokeWidth={3} dot={false} fill="url(#colorRevenue)" />
-                    <Line yAxisId="right" type="monotone" dataKey="occupancy" name="Doluluk" stroke={THEME.colors.success} strokeWidth={3} dot={false} fill="url(#colorOccupancy)" />
-                  </LineChart>
-                </ResponsiveContainer>
-             ) : (
-                 <div style={{height:'100%', display:'flex', alignItems:'center', justifyContent:'center', color:THEME.colors.textSub}}>Trend verisi yok</div>
-             )}
-          </div>
-        </div>
-
-        {/* Verimlilik Grafiği */}
-        <div style={THEME.cardStyle}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "24px", alignItems:"center" }}>
-            <div>
-                <h3 style={THEME.titleStyle}>Personel Verimlilik Trendi</h3>
-                <p style={THEME.subTitleStyle}>Personel başına düşen gelir</p>
-            </div>
-            <div style={{ background: "rgba(0,0,0,0.2)", padding: "4px", borderRadius: "8px" }}>
-                <button onClick={() => onPeriodChange(6)} style={getBtnStyle(6)}>6 Ay</button>
-                <button onClick={() => onPeriodChange(12)} style={getBtnStyle(12)}>12 Ay</button>
-                <button onClick={() => onPeriodChange(18)} style={getBtnStyle(18)}>18 Ay</button>
-            </div>
-          </div>
-          
-          <div style={{ width: "100%", height: 300 }}>
-             {chartData.length > 0 ? (
-                <ResponsiveContainer>
-                  <LineChart data={chartData}>
-                    {commonGrid}{commonXAxis}{commonYAxis}
-                    <Tooltip content={<CustomTooltip />} />
-                    <ReferenceLine y={12000} label={{ value: "HEDEF", fill: THEME.colors.warning, fontSize: 10, position: 'insideTopRight' }} stroke={THEME.colors.warning} strokeDasharray="4 4" />
-                    <Line type="monotone" dataKey="productivity" name="Pers. Başına Gelir (₺)" stroke={THEME.colors.warning} strokeWidth={3} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-             ) : (
-                 <div style={{height:'100%', display:'flex', alignItems:'center', justifyContent:'center', color:THEME.colors.textSub}}>Veri yok</div>
-             )}
-          </div>
-        </div>
-      </div>
-
-      {/* 2. BLOK: RİSK VE MESAİ ANALİZİ */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-        <div style={THEME.cardStyle}>
-          <div style={{ marginBottom: "20px" }}>
-             <h3 style={THEME.titleStyle}>Mevcut İş Yükü (Overtime)</h3>
-             <p style={THEME.subTitleStyle}>Yasal çalışma saati sınırlarını aşma durumu</p>
-          </div>
-          <div style={{ width: "100%", height: 300 }}>
-            <ResponsiveContainer>
-              <BarChart data={overtimeData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-                {chartGradients}{commonGrid}{commonYAxis}
-                <XAxis dataKey="name" stroke={THEME.colors.textSub} tick={{ fill: THEME.colors.textSub, fontSize: 11, fontWeight:500 }} tickLine={false} axisLine={false} dy={10} interval={0} />
+          <div style={{ flex: 1, minHeight: 0, width: "100%" }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                {chartGradients}{commonGrid}{commonXAxis}
+                <YAxis yAxisId="left" stroke={THEME.colors.textSub} tickFormatter={(val)=>`₺${val/1000}k`} tickLine={false} axisLine={false} fontSize={10} width={40}/>
+                <YAxis yAxisId="right" orientation="right" stroke={THEME.colors.textSub} tickLine={false} axisLine={false} unit="%" fontSize={10} width={30}/>
                 <Tooltip content={<CustomTooltip />} />
-                <ReferenceLine y={180} label={{ value: "LİMİT", fill: THEME.colors.danger, fontSize: 10, position: 'insideTopRight' }} stroke={THEME.colors.danger} strokeDasharray="4 4" />
-                <Bar dataKey="normal" stackId="a" name="Normal Mesai" fill="url(#barPrimary)" barSize={32} />
-                <Bar dataKey="overtime" stackId="a" name="Fazla Mesai (Risk)" fill="url(#barDanger)" radius={[4, 4, 0, 0]} barSize={32} />
+                <Legend wrapperStyle={{ fontSize: "10px", bottom: 0 }} iconSize={8} />
+                <Line yAxisId="left" type="monotone" dataKey="revenue" name="Gelir" stroke={THEME.colors.danger} strokeWidth={2} dot={false} fill="url(#colorRevenue)" />
+                <Line yAxisId="right" type="monotone" dataKey="occupancy" name="Doluluk" stroke={THEME.colors.success} strokeWidth={2} dot={false} fill="url(#colorOccupancy)" />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* 2. VERİMLİLİK */}
+        <div style={THEME.cardStyle}>
+          <div style={{ marginBottom: "6px" }}><h3 style={THEME.titleStyle}>Verimlilik Trendi</h3></div>
+          <div style={{ flex: 1, minHeight: 0, width: "100%" }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                {commonGrid}{commonXAxis}{commonYAxis}
+                <Tooltip content={<CustomTooltip />} />
+                <ReferenceLine y={12000} stroke={THEME.colors.warning} strokeDasharray="3 3" />
+                <Line type="monotone" dataKey="productivity" name="Verimlilik" stroke={THEME.colors.warning} strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* 3. OVERTIME */}
+        <div style={THEME.cardStyle}>
+          <div style={{ marginBottom: "6px" }}><h3 style={THEME.titleStyle}>Mevcut İş Yükü (Overtime)</h3></div>
+          <div style={{ flex: 1, minHeight: 0, width: "100%" }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={overtimeData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                {chartGradients}{commonGrid}{commonYAxis}
+                <XAxis dataKey="name" stroke={THEME.colors.textSub} tick={{ fontSize: 9 }} tickFormatter={(val)=> val.substring(0,8)} interval={0} tickLine={false} axisLine={false} />
+                <Tooltip content={<CustomTooltip />} />
+                <ReferenceLine y={180} stroke={THEME.colors.danger} strokeDasharray="3 3" />
+                <Bar dataKey="normal" stackId="a" fill="url(#barPrimary)" barSize={20} />
+                <Bar dataKey="overtime" stackId="a" fill="url(#barDanger)" radius={[4, 4, 0, 0]} barSize={20} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
+        {/* 4. RİSK MATRİSİ */}
         <div style={THEME.cardStyle}>
-          <div style={{ marginBottom: "20px" }}>
-             <h3 style={THEME.titleStyle}>Personel Risk Matrisi ⚠️</h3>
-             <p style={THEME.subTitleStyle}>İş Yükü vs. İstifa Oranı (Turnover) Analizi</p>
-          </div>
-          <div style={{ width: "100%", height: 300 }}>
-            <ResponsiveContainer>
-              <ScatterChart margin={{ top: 10, right: 20, left: 0, bottom: 30 }}>
+          <div style={{ marginBottom: "6px" }}><h3 style={THEME.titleStyle}>Personel Risk Matrisi</h3></div>
+          <div style={{ flex: 1, minHeight: 0, width: "100%" }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ScatterChart margin={{ top: 5, right: 5, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={THEME.colors.border} opacity={0.4} />
-                <XAxis type="number" dataKey="x" name="Fazla Mesai (Saat)" stroke={THEME.colors.textSub} tick={{fontSize:12}} label={{ value: 'Fazla Mesai (Yorgunluk)', position: 'insideBottom', offset: -20, fill: THEME.colors.textSub, fontSize:11 }} />
-                <YAxis type="number" dataKey="y" name="Turnover Oranı (%)" stroke={THEME.colors.textSub} tick={{fontSize:12}} label={{ value: 'İstifa Oranı (%)', angle: -90, position: 'insideLeft', fill: THEME.colors.textSub, fontSize:11 }} />
-                <ZAxis type="number" dataKey="z" range={[100, 500]} name="Personel Sayısı" />
+                <XAxis type="number" dataKey="x" stroke={THEME.colors.textSub} tick={{fontSize:10}} tickLine={false} axisLine={false} />
+                <YAxis type="number" dataKey="y" stroke={THEME.colors.textSub} tick={{fontSize:10}} tickLine={false} axisLine={false} />
+                <ZAxis type="number" dataKey="z" range={[50, 300]} />
                 <Tooltip content={<CustomTooltip />} />
-                <ReferenceLine x={30} stroke={THEME.colors.textSub} strokeDasharray="3 3" label={{position:'top', value:'RİSK EŞİĞİ', fontSize:10, fill:THEME.colors.textSub}} />
+                <ReferenceLine x={30} stroke={THEME.colors.textSub} strokeDasharray="3 3" />
                 <ReferenceLine y={10} stroke={THEME.colors.textSub} strokeDasharray="3 3" />
-                <Scatter name="Departmanlar" data={riskMatrixData} shape="circle">
-                  {riskMatrixData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.fill} stroke={THEME.colors.cardBg} strokeWidth={2} />
-                  ))}
-                </Scatter>
+                <Scatter data={riskMatrixData} fill="#8884d8" />
               </ScatterChart>
             </ResponsiveContainer>
-            <div style={{marginTop:'12px', fontSize:'11px', color:THEME.colors.textSub, textAlign:'center'}}>
-              * Sağ üst köşedeki departmanlar (Kırmızı) hem çok çalışıyor hem de ekibi kaybediyor. Acil müdahale gerektirir.
-            </div>
           </div>
         </div>
       </div>
 
-      {/* 3. BLOK: SİMÜLASYON VE PDF ALANI */}
-      <div ref={simulationRef} style={{...THEME.cardStyle, border: `1px solid ${THEME.colors.danger}30`, position:'relative'}}>
-         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "24px", alignItems:'flex-start' }}>
-            <div>
-              <h3 style={{...THEME.titleStyle, color: THEME.colors.danger, display:'flex', alignItems:'center', gap:'8px'}}>
-                 ⚡ KDS Personel Planlama Simülasyonu
-              </h3>
-              <p style={THEME.subTitleStyle}>Parametreleri değiştirerek senaryo analizi yapın (What-If Analysis)</p>
-            </div>
-             
-             <div style={{ display:'flex', alignItems:'center', gap:'12px' }}>
-               <button 
-                  onClick={handleDownloadPDF}
-                  style={{
-                    padding:'6px 16px', borderRadius:'8px', border:'1px solid rgba(255,255,255,0.2)', 
-                    background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize:'13px', fontWeight:'600',
-                    cursor:'pointer', display:'flex', alignItems:'center', gap:'6px', transition: 'background 0.2s'
-                  }}
-                  onMouseOver={(e) => e.target.style.background = 'rgba(255,255,255,0.1)'}
-                  onMouseOut={(e) => e.target.style.background = 'rgba(255,255,255,0.05)'}
-               >
-                 📄 Rapor İndir
-               </button>
+      {/* SAĞ TARAF: SİMÜLASYON PANELI */}
+      <div style={{...THEME.cardStyle, border: `1px solid ${simMode === 'recruitment' ? THEME.colors.danger : THEME.colors.warning}30`, display: 'flex', flexDirection: 'column', overflow: 'hidden'}}>
+         
+         <div style={{ display:'flex', gap:'8px', marginBottom:'12px', borderBottom:`1px solid ${THEME.colors.border}`, paddingBottom:'8px' }}>
+             <button onClick={()=>setSimMode('recruitment')} style={{flex:1, padding:'6px', borderRadius:'6px', fontSize:'11px', fontWeight:'700', cursor:'pointer', border:'none', background: simMode === 'recruitment' ? `${THEME.colors.danger}20` : 'transparent', color: simMode === 'recruitment' ? THEME.colors.danger : THEME.colors.textSub}}>👥 İşe Alım</button>
+             <button onClick={()=>setSimMode('cost')} style={{flex:1, padding:'6px', borderRadius:'6px', fontSize:'11px', fontWeight:'700', cursor:'pointer', border:'none', background: simMode === 'cost' ? `${THEME.colors.warning}20` : 'transparent', color: simMode === 'cost' ? THEME.colors.warning : THEME.colors.textSub}}>⚡ Maliyet</button>
+         </div>
 
-               <div style={{ display:'flex', alignItems:'center', gap:'16px', fontSize:'13px', color: THEME.colors.textSub, background: THEME.colors.bgDark, padding:'8px 16px', borderRadius:'20px' }}>
-                  <div style={{display:'flex', alignItems:'center', gap:'6px'}}><div style={{width:12, height:12, borderRadius:'4px', background: THEME.colors.primary}}></div> Mevcut</div>
-                  <div style={{display:'flex', alignItems:'center', gap:'6px'}}><div style={{width:12, height:12, borderRadius:'4px', background: THEME.colors.danger}}></div> Önerilen</div>
+         <div style={{ display: "flex", flexDirection:'column', gap:'8px', marginBottom: "12px", borderBottom:`1px solid ${THEME.colors.border}`, paddingBottom:'12px' }}>
+            <div style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+                <h3 style={{...THEME.titleStyle, color: simMode === 'recruitment' ? THEME.colors.danger : THEME.colors.warning, margin:0, fontSize:'14px'}}>
+                   {simMode === 'recruitment' ? 'Kadro & Kalite' : 'Kapasite Analizi'}
+                </h3>
+                <div style={{display:'flex', gap:'6px'}}>
+                   <button onClick={handleAiPredict} style={{padding:'4px 10px', borderRadius:'6px', background: `linear-gradient(135deg, ${THEME.colors.purple}, ${THEME.colors.ai})`, color: '#fff', fontSize:'10px', border:'none', cursor:'pointer', fontWeight:'bold', boxShadow: '0 0 10px rgba(217, 70, 239, 0.4)'}}>🤖 AI</button>
+                   <button onClick={handleDownloadPDF} style={{padding:'4px 8px', borderRadius:'6px', background: 'rgba(255,255,255,0.05)', color: '#fff', fontSize:'10px', border:'1px solid rgba(255,255,255,0.1)', cursor:'pointer', fontWeight:'bold'}}>🖨️ PDF</button>
+                </div>
+            </div>
+            {aiPrediction && (
+               <div style={{marginTop:'4px', padding:'8px', background: `${THEME.colors.ai}15`, borderRadius:'6px', borderLeft:`3px solid ${THEME.colors.ai}`, fontSize:'10px', color: THEME.colors.textMain, display: 'flex', justifyContent:'space-between', alignItems:'center'}}>
+                  <span>🤖 <strong>{aiPrediction.horizon}</strong> tahmini: <strong>%{aiPrediction.nextVal}</strong>.</span>
+                  <span style={{opacity:0.7, fontSize:'9px'}}>Güven: {aiPrediction.confidence}</span>
                </div>
-             </div>
-          </div>
+            )}
+         </div>
 
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'24px', padding:'24px', background: `${THEME.colors.bgDark}80`, borderRadius:'12px', marginBottom:'24px', border: `1px solid ${THEME.colors.border}` }}>
-            <div>
-              <div style={{display:'flex', justifyContent:'space-between', marginBottom:'12px'}}>
-                <label style={{fontSize:'13px', fontWeight:'600', color: THEME.colors.textMain}}>Beklenen Doluluk Artışı</label>
-                <span style={{fontSize:'14px', color: THEME.colors.danger, fontWeight:'800', padding:'2px 8px', background:`${THEME.colors.danger}20`, borderRadius:'6px'}}>{occScenario > 0 ? `+${occScenario}%` : `${occScenario}%`}</span>
+         {/* SİMÜLASYON İÇERİĞİ: İŞE ALIM & KALİTE */}
+         {simMode === 'recruitment' && (
+            <>
+              <div style={{ display:'flex', flexDirection:'column', gap:'12px', padding:'10px', background: `${THEME.colors.bgDark}80`, borderRadius:'8px', marginBottom:'12px' }}>
+                <div>
+                  <div style={{display:'flex', justifyContent:'space-between', marginBottom:'4px'}}>
+                     <label style={{fontSize:'10px', color: THEME.colors.textMain}}>Doluluk Artışı</label>
+                     <span style={{fontSize:'11px', color: isAiActive ? THEME.colors.ai : (occScenario > 0 ? THEME.colors.danger : THEME.colors.success), fontWeight:'700'}}>{occScenario > 0 ? `+${occScenario}%` : `${occScenario}%`} {isAiActive && '✨'}</span>
+                  </div>
+                  <input type="range" min="-20" max="30" step="1" value={occScenario} onChange={(e) => setOccScenario(Number(e.target.value))} className={`kds-range-input ${isAiActive ? 'thumb-ai' : 'thumb-danger'}`} />
+                </div>
+                <div>
+                  <div style={{display:'flex', justifyContent:'space-between', marginBottom:'4px'}}><label style={{fontSize:'10px', color: THEME.colors.textMain}}>Verimlilik</label><span style={{fontSize:'11px', color: THEME.colors.primary}}>%{prodTarget}</span></div>
+                  <input type="range" min="80" max="120" step="5" value={prodTarget} onChange={(e) => setProdTarget(Number(e.target.value))} className="kds-range-input thumb-primary" />
+                </div>
+                <div>
+                  <div style={{display:'flex', justifyContent:'space-between', marginBottom:'4px'}}><label style={{fontSize:'10px', color: THEME.colors.textMain}}>Maliyet</label><span style={{fontSize:'11px', color: THEME.colors.success}}>₺{avgCost.toLocaleString()}</span></div>
+                  <input type="range" min="20000" max="60000" step="1000" value={avgCost} onChange={(e) => setAvgCost(Number(e.target.value))} className="kds-range-input thumb-success" />
+                </div>
               </div>
-              <input type="range" min="-20" max="30" step="5" value={occScenario} onChange={(e) => setOccScenario(Number(e.target.value))} className="kds-range-input thumb-danger" />
-            </div>
-            <div>
-              <div style={{display:'flex', justifyContent:'space-between', marginBottom:'12px'}}>
-                <label style={{fontSize:'13px', fontWeight:'600', color: THEME.colors.textMain}}>Verimlilik Hedefi</label>
-                <span style={{fontSize:'14px', color: THEME.colors.primary, fontWeight:'800', padding:'2px 8px', background:`${THEME.colors.primary}20`, borderRadius:'6px'}}>%{prodTarget}</span>
-              </div>
-              <input type="range" min="80" max="120" step="5" value={prodTarget} onChange={(e) => setProdTarget(Number(e.target.value))} className="kds-range-input thumb-primary" />
-            </div>
-            <div>
-              <div style={{display:'flex', justifyContent:'space-between', marginBottom:'12px'}}>
-                <label style={{fontSize:'13px', fontWeight:'600', color: THEME.colors.textMain}}>Ort. Personel Maliyeti</label>
-                <span style={{fontSize:'14px', color: THEME.colors.success, fontWeight:'800', padding:'2px 8px', background:`${THEME.colors.success}20`, borderRadius:'6px'}}>₺{avgCost.toLocaleString()}</span>
-              </div>
-              <input type="range" min="20000" max="60000" step="1000" value={avgCost} onChange={(e) => setAvgCost(Number(e.target.value))} className="kds-range-input thumb-success" />
-            </div>
-          </div>
 
-          <div style={{ width: "100%", height: 350 }}>
-            <ResponsiveContainer>
-              <BarChart data={simulatedDeptData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                {chartGradients}
-                <CartesianGrid strokeDasharray="3 3" stroke={THEME.colors.border} horizontal={true} vertical={false} opacity={0.4} />
-                <XAxis type="number" stroke={THEME.colors.textSub} tick={{ fill: THEME.colors.textSub, fontSize: 12, fontWeight:500 }} axisLine={false} tickLine={false} />
-                <YAxis dataKey="name" type="category" stroke={THEME.colors.textSub} tick={{ fill: THEME.colors.textMain, fontSize: 13, fontWeight:600 }} width={110} axisLine={false} tickLine={false} />
-                <Tooltip content={<CustomTooltip />} />
-                <Bar dataKey="mevcut" name="Mevcut Kadro" fill="url(#barPrimary)" radius={[0, 6, 6, 0]} barSize={24} />
-                <Bar dataKey="onerilen" name="Simülasyon Sonucu" fill="url(#barDanger)" radius={[0, 6, 6, 0]} barSize={24} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          
-          {/* --- YÖNETİCİ ÖZETİ (GÜNCELLENDİ) --- */}
-          <div style={{marginTop: 24, padding: "20px", background: statusBg, borderRadius: "12px", borderLeft: `4px solid ${statusBorder}`}}>
-            <h4 style={{margin: '0 0 8px 0', color: statusBorder, fontSize: 15, fontWeight: 700, display:'flex', alignItems:'center', gap:'8px'}}>
-               📊 Yönetici Özeti (Karar Destek Çıktısı)
-            </h4>
-            <div style={{color: THEME.colors.textMain, fontSize: 14, lineHeight: '1.6'}}>
-               Operasyonel sürdürülebilirlik için toplam <strong style={{color: THEME.colors.textMain, background: `${statusBorder}30`, padding:'2px 6px', borderRadius:'4px'}}>
-                 {gapValue} {isHiring ? "yeni personel" : "personel"}
-               </strong> {isHiring ? "alımını" : "azaltımını / norm fazlasını"} işaret etmektedir. 
-               
-               <br />
-               {isHiring ? "Tahmini Aylık Ek Bütçe Yükü: " : "Tahmini Aylık Personel Tasarrufu: "}
-               <strong style={{color: statusBorder}}>₺{estCost.toLocaleString()}</strong>
-            </div>
-          </div>
+              {/* YENİ: HİZMET KALİTESİ BAROMETRESİ */}
+              <div style={{padding:'0 4px', marginBottom:'10px'}}>
+                 <div style={{display:'flex', justifyContent:'space-between', marginBottom:'4px', fontSize:'10px'}}>
+                    <span style={{color:THEME.colors.textSub}}>Tahmini Hizmet Kalitesi</span>
+                    <span style={{color:qualityColor, fontWeight:'bold'}}>{serviceQualityScore.toFixed(0)}/100 ({qualityText})</span>
+                 </div>
+                 <div style={{width:'100%', height:'6px', background:'rgba(255,255,255,0.1)', borderRadius:'3px', overflow:'hidden'}}>
+                    <div style={{width:`${serviceQualityScore}%`, height:'100%', background: qualityColor, transition:'all 0.5s'}}></div>
+                 </div>
+              </div>
+
+              <div style={{ flexShrink: 0, height: "160px", width: "100%", display:'flex', alignItems:'center', justifyContent:'center', marginBottom:'10px', position:'relative' }}>
+                 <ResponsiveContainer width="100%" height="100%">
+                   <PieChart>
+                     <Pie data={recruitmentSim.depts} dataKey="totalBudget" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={70} paddingAngle={2}>
+                        {recruitmentSim.depts.map((entry, index) => <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} stroke={THEME.colors.cardBg} strokeWidth={2} />)}
+                     </Pie>
+                     <Tooltip content={<CustomTooltip />} />
+                   </PieChart>
+                 </ResponsiveContainer>
+                 <div style={{position:'absolute', textAlign:'center', pointerEvents:'none'}}>
+                    <div style={{fontSize:'9px', color:THEME.colors.textSub}}>Bütçe</div>
+                 </div>
+              </div>
+              <div className="custom-scroll" style={{ flex: 1, overflowY: "auto", borderTop:`1px solid ${THEME.colors.border}`, paddingTop:'8px' }}>
+                 <table style={{width:'100%', borderCollapse:'collapse', fontSize:'11px', color:THEME.colors.textMain}}>
+                    <thead><tr style={{textAlign:'left', color:THEME.colors.textSub}}><th style={{padding:'4px'}}>Dept</th><th style={{padding:'4px', textAlign:'center'}}>Mevcut</th><th style={{padding:'4px', textAlign:'center'}}>Öneri</th><th style={{padding:'4px', textAlign:'right'}}>Fark</th></tr></thead>
+                    <tbody>
+                       {recruitmentSim.depts.map((dept, i) => {
+                          const isPositive = dept.gap > 0;
+                          return (<tr key={i} style={{borderBottom:`1px solid rgba(255,255,255,0.03)`}}><td style={{padding:'6px 4px', fontWeight:'600'}}>{dept.name}</td><td style={{padding:'6px 4px', textAlign:'center', color:THEME.colors.textSub}}>{dept.mevcut}</td><td style={{padding:'6px 4px', textAlign:'center', fontWeight:'bold'}}>{dept.onerilen}</td><td style={{padding:'6px 4px', textAlign:'right'}}><span style={{color: isPositive ? THEME.colors.danger : THEME.colors.success, fontWeight:'700'}}>{isPositive ? '+' : ''}{dept.gap}</span></td></tr>)
+                       })}
+                    </tbody>
+                 </table>
+              </div>
+            </>
+         )}
+
+         {/* SİMÜLASYON İÇERİĞİ: MALİYET */}
+         {simMode === 'cost' && (
+            <>
+              <div style={{ display:'flex', flexDirection:'column', gap:'12px', padding:'10px', background: `${THEME.colors.bgDark}80`, borderRadius:'8px', marginBottom:'12px' }}>
+                 <div>
+                   <div style={{display:'flex', justifyContent:'space-between', marginBottom:'4px'}}><label style={{fontSize:'10px', color: THEME.colors.textMain}}>Doluluk Senaryosu</label><span style={{fontSize:'11px', color: isAiActive ? THEME.colors.ai : THEME.colors.primary}}>{occScenario}% {isAiActive && '✨'}</span></div>
+                   <input type="range" min="-50" max="50" step="1" value={occScenario} onChange={(e) => setOccScenario(Number(e.target.value))} className={`kds-range-input ${isAiActive ? 'thumb-ai' : 'thumb-primary'}`} />
+                 </div>
+                 <div>
+                   <div style={{display:'flex', justifyContent:'space-between', marginBottom:'4px'}}><label style={{fontSize:'10px', color: THEME.colors.textMain}}>Esnek İşgücü Oranı</label><span style={{fontSize:'11px', color: THEME.colors.warning}}>{flexibleRatio}%</span></div>
+                   <input type="range" min="0" max="50" step="5" value={flexibleRatio} onChange={(e) => setFlexibleRatio(Number(e.target.value))} className="kds-range-input thumb-warning" />
+                 </div>
+                 <div>
+                   <div style={{display:'flex', justifyContent:'space-between', marginBottom:'4px'}}><label style={{fontSize:'10px', color: THEME.colors.textMain}}>Mesai Çarpanı</label><span style={{fontSize:'11px', color: THEME.colors.danger}}>{overtimeMultiplier}x</span></div>
+                   <input type="range" min="1.0" max="3.0" step="0.5" value={overtimeMultiplier} onChange={(e) => setOvertimeMultiplier(Number(e.target.value))} className="kds-range-input thumb-danger" />
+                 </div>
+              </div>
+              <div style={{ flexShrink: 0, height: "180px", width: "100%", display:'flex', alignItems:'center', justifyContent:'center', marginBottom:'10px', position:'relative' }}>
+                 <ResponsiveContainer width="100%" height="100%">
+                   <PieChart>
+                     <Pie data={costSim.chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={70} paddingAngle={3}>
+                        {costSim.chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={COST_COLORS[index]} stroke={THEME.colors.cardBg} strokeWidth={2} />)}
+                     </Pie>
+                     <Tooltip content={<CustomTooltip />} />
+                     <Legend wrapperStyle={{fontSize:'10px', bottom:0}} iconSize={8} />
+                   </PieChart>
+                 </ResponsiveContainer>
+              </div>
+              <div className="custom-scroll" style={{ flex: 1, overflowY: "auto", borderTop:`1px solid ${THEME.colors.border}`, paddingTop:'8px' }}>
+                 <table style={{width:'100%', borderCollapse:'collapse', fontSize:'10px', color:THEME.colors.textMain}}>
+                    <thead><tr style={{textAlign:'left', color:THEME.colors.textSub}}><th style={{padding:'4px'}}>Dept</th><th style={{padding:'4px', textAlign:'center'}}>Gereken</th><th style={{padding:'4px', textAlign:'right'}}>Durum</th></tr></thead>
+                    <tbody>
+                       {costSim.details.map((dept, i) => {
+                          const color = dept.gap < 0 ? THEME.colors.idle : dept.gap > 0 ? THEME.colors.overtime : THEME.colors.success;
+                          return (<tr key={i} style={{borderBottom:`1px solid rgba(255,255,255,0.03)`}}><td style={{padding:'6px 4px', fontWeight:'600'}}>{dept.name}</td><td style={{padding:'6px 4px', textAlign:'center'}}>{dept.needed}</td><td style={{padding:'6px 4px', textAlign:'right'}}><span style={{color: color, fontWeight:'700'}}>{dept.status === "Atıl" ? `${dept.gap} (Atıl)` : dept.status === "Mesai" ? `+${dept.gap} (Mesai)` : 'OK'}</span></td></tr>)
+                       })}
+                    </tbody>
+                 </table>
+              </div>
+            </>
+         )}
+
+         {/* ORTAK ALT ÖZET */}
+         <div style={{marginTop: 10, padding: "10px", background: simMode==='recruitment' ? `${THEME.colors.danger}15` : `${THEME.colors.warning}15`, borderRadius: "6px", borderLeft: `3px solid ${simMode==='recruitment' ? THEME.colors.danger : THEME.colors.warning}`, fontSize: 11, color: THEME.colors.textMain, flexShrink:0}}>
+             {simMode === 'recruitment' ? (
+                <><strong>Sonuç:</strong> {gapValue} kişi {isHiring ? 'alım' : 'çıkarım'}. <strong>Hizmet Kalitesi:</strong> <span style={{color:qualityColor}}>{qualityText}</span></>
+             ) : (
+                <><strong>Verimlilik:</strong> Esnek işgücü sayesinde <strong>₺{costSim.totalSaved.toLocaleString()}</strong> maliyet kurtarıldı.</>
+             )}
+         </div>
+      </div>
+
+      <div style={{position:'absolute', left:'-9999px', top:0, width:'794px', background:'#fff', color:'#000', padding:'40px', fontFamily:'Arial, sans-serif'}} ref={reportRef}>
+        <div style={{borderBottom:'2px solid #333', paddingBottom:'20px', marginBottom:'30px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+           <div>
+             <h1 style={{margin:0, fontSize:'24px', textTransform:'uppercase'}}>KDS Raporu: {simMode === 'recruitment' ? 'İşe Alım & Kalite' : 'Maliyet & Kapasite'}</h1>
+             <p style={{margin:'5px 0 0', color:'#555', fontSize:'14px'}}>Hilton İzmir - Yönetim Bilişim Sistemleri</p>
+           </div>
+           <div style={{textAlign:'right'}}>
+             <div style={{fontSize:'12px', color:'#777'}}>Rapor Tarihi</div>
+             <div style={{fontWeight:'bold'}}>{new Date().toLocaleDateString()}</div>
+           </div>
+        </div>
       </div>
     </div>
   );
