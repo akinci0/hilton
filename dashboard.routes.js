@@ -104,12 +104,17 @@ router.get("/kds-analytics/:districtId", async (req, res) => {
         iy.turnover_orani as turnover,
         
         -- DÜZELTME: Büyüktür (>) yerine Büyük Eşittir (>=) yaptık.
+        -- DÜZELTME: Risk sadece istifaya değil, MESAİYE de bağlıdır!
         CASE 
-            WHEN iy.turnover_orani >= 15 THEN 'KRİTİK'  -- Artık 15.00 dahil Kırmızı olur
-            WHEN iy.turnover_orani >= 8 THEN 'YÜKSEK'   -- 8.00 dahil Sarı olur
-            ELSE 'DÜŞÜK'
+            -- Eğer Turnover %12'den fazlaysa VEYA Mesai 45 saati geçerse -> KRİTİK (Kırmızı)
+            WHEN iy.turnover_orani >= 12 OR iy.fazla_mesai_saati >= 45 THEN 'KRİTİK'
+            
+            -- Eğer Turnover %6'dan fazlaysa VEYA Mesai 25 saati geçerse -> YÜKSEK (Sarı)
+            WHEN iy.turnover_orani >= 6 OR iy.fazla_mesai_saati >= 25 THEN 'YÜKSEK'
+            
+            ELSE 'DÜŞÜK' -- (Yeşil)
         END as risk,
-        
+
         iy.personel_sayi as z
       FROM is_yuku iy
       JOIN departmanlar d ON iy.departman_id = d.departman_id

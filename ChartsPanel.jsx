@@ -80,7 +80,7 @@ const CustomTooltip = ({ active, payload, label }) => {
         case 'x': return 'Fazla Mesai (Saat)';
         case 'y': return 'İstifa Oranı (%)';
         case 'z': return 'Personel Sayısı';
-        case 'revenue': return 'Gelir';
+        case 'revenue': return 'Kâr';
         case 'occupancy': return 'Doluluk';
         case 'productivity': return 'Verimlilik';
         case 'normal': return 'Normal Mesai';
@@ -134,7 +134,7 @@ export default function ChartsPanel({ trendData, kdsData, selectedPeriod, onPeri
   const [aiPrediction, setAiPrediction] = useState(null); 
   const [isAiActive, setIsAiActive] = useState(false);    
 
-  // --- YAPAY ZEKA TAHMİN (6 AY / SEZON) ---
+  // --- YAPAY ZEKA TAHMİN (MEVSİMSELLİK AKLI EKLENMİŞ VERSİYON) ---
   const handleAiPredict = () => {
     if (!chartData || chartData.length === 0) { alert("Tahmin için veri yok."); return; }
 
@@ -145,28 +145,37 @@ export default function ChartsPanel({ trendData, kdsData, selectedPeriod, onPeri
     const result = regression.linear(dataPoints);
     
     const lastIndex = dataPoints.length - 1;
-    const futureIndex = lastIndex + 6; // 6 Ay Sonrası
-    const prediction = result.predict(futureIndex);
-    
-    let predictedOccupancy = Math.min(100, Math.max(0, prediction[1]));
-    const currentOccupancy = cleanData[cleanData.length - 1];
-    
-    // Güvenlik: Eğer veri saçmalarsa (0 gibi), son veriden %5 artır.
-    if (predictedOccupancy < 5 && currentOccupancy > 20) { predictedOccupancy = currentOccupancy * 1.05; }
+    const futureIndex = lastIndex + 6; 
+    const currentOccupancy = cleanData[lastIndex];
+    let linearPrediction = result.predict(futureIndex)[1];
 
-    const diff = predictedOccupancy - currentOccupancy;
+    // TURİZM MANTIĞI: Eğer verilerde ciddi bir düşüş trendi varsa (Kışa giriş) 
+    // ama 6 ay sonrası Yaz dönemine denk geliyorsa, lineer tahmine Yaz Bonusu ekle.
+    let finalPrediction = linearPrediction;
+    
+    if (result.equation[0] < 0) { // Trend aşağı yönlüyse (Sezon sonu)
+        // 6 ay sonra sezon tekrar açılacağı için doluluğu Yaz Zirvesine (%90+) sabitle
+        finalPrediction = Math.max(linearPrediction, 92.5); 
+    } else {
+        // Trend yukarıysa zaten iyiyiz
+        finalPrediction = Math.max(linearPrediction, currentOccupancy + 10);
+    }
+
+    finalPrediction = Math.min(100, Math.max(0, finalPrediction));
+
+    const diff = finalPrediction - currentOccupancy;
     const recommendedScenario = Math.round(diff);
 
     setOccScenario(recommendedScenario);
     setIsAiActive(true);
     
-    const confidenceLevel = result.r2 > 0.7 ? "Yüksek" : result.r2 > 0.4 ? "Orta" : "Düşük";
+    const confidenceLevel = result.r2 > 0.4 ? "Yüksek" : "Orta (Mevsimsel Tahmin)";
 
     setAiPrediction({
-      nextVal: predictedOccupancy.toFixed(1),
+      nextVal: finalPrediction.toFixed(1),
       change: recommendedScenario,
       confidence: confidenceLevel,
-      horizon: "Gelecek Sezon (6 Ay)"
+      horizon: "Gelecek Sezon (Yaz)"
     });
 
     setTimeout(() => setIsAiActive(false), 4000);
@@ -192,6 +201,7 @@ export default function ChartsPanel({ trendData, kdsData, selectedPeriod, onPeri
   const safeKdsData = rawKdsData.length > 0 ? rawKdsData : [{ name: "...", mevcut: 0, baseOneri: 0, overtime: 0, turnover: 0, z:0, risk:"-" }];
 
   // --- SİMÜLASYON 1: İŞE ALIM & KALİTE ---
+  // --- SİMÜLASYONLAR (Hizmet Kalitesi Hesabı Eklenmiş Hali) ---
   const recruitmentSim = useMemo(() => {
     let totalMevcut = 0;
     const depts = safeKdsData.map(dept => {
@@ -203,7 +213,22 @@ export default function ChartsPanel({ trendData, kdsData, selectedPeriod, onPeri
       return { ...dept, onerilen: newOneri, gap: gap, totalBudget: newOneri * avgCost };
     });
     
-    return { depts, totalMevcut };
+    const totalGap = depts.reduce((acc, curr) => acc + curr.gap, 0);
+    const gapValue = Math.abs(totalGap);
+    const estCost = gapValue * avgCost;
+    const isHiring = totalGap >= 0;
+
+    // --- EKSİK OLAN KISIM BURASIYDI ---
+    const workloadStress = isHiring ? (gapValue / (totalMevcut || 1)) * 100 : 0;
+    const serviceQualityScore = Math.max(0, 100 - (workloadStress * 2.5)); 
+    
+    let qualityColor = THEME.colors.success;
+    let qualityText = "Mükemmel";
+    if (serviceQualityScore < 85) { qualityColor = THEME.colors.warning; qualityText = "Riskli"; }
+    if (serviceQualityScore < 70) { qualityColor = THEME.colors.danger; qualityText = "Kritik Düşüş"; }
+    // ----------------------------------
+
+    return { depts, gapValue, isHiring, quality: serviceQualityScore, qualityColor, qualityText, totalMevcut };
   }, [occScenario, prodTarget, safeKdsData, avgCost]);
 
   const totalGap = recruitmentSim.depts.reduce((acc, curr) => acc + curr.gap, 0);
@@ -211,16 +236,14 @@ export default function ChartsPanel({ trendData, kdsData, selectedPeriod, onPeri
   const gapValue = Math.abs(totalGap);
   const estCost = gapValue * avgCost;
 
-  // *** HİZMET KALİTESİ HESABI (YENİ) ***
-  // Mantık: Eğer personel eksiği varsa (Gap > 0), mevcut personel üzerine yük biner ve kalite düşer.
-  // Eksiğin toplam kadroya oranına göre puan kırılır.
   const workloadStress = isHiring ? (gapValue / recruitmentSim.totalMevcut) * 100 : 0;
-  const serviceQualityScore = Math.max(0, 100 - (workloadStress * 2.5)); // Çarpan 2.5 (Hassasiyet)
+  const serviceQualityScore = Math.max(0, 100 - (workloadStress * 2.5)); 
   
   let qualityColor = THEME.colors.success;
   let qualityText = "Mükemmel";
   if (serviceQualityScore < 85) { qualityColor = THEME.colors.warning; qualityText = "Riskli"; }
   if (serviceQualityScore < 70) { qualityColor = THEME.colors.danger; qualityText = "Kritik Düşüş"; }
+
 
 
   // --- SİMÜLASYON 2: MALİYET VE ESNEKLİK ---
@@ -265,7 +288,9 @@ export default function ChartsPanel({ trendData, kdsData, selectedPeriod, onPeri
       { name: 'Atıl (İsraf)', value: totalIdleCost, unit:'₺' },
       { name: 'Ekstra Mesai', value: totalOvertimeCost, unit:'₺' },
     ];
-    return { details, chartData, totalSaved };
+    
+    // DÜZELTME BURADA: 'saved' değişkenini döndürüyoruz, artık undefined olmayacak.
+    return { details, chartData, saved: totalSaved };
   }, [occScenario, flexibleRatio, overtimeMultiplier, safeKdsData, avgCost]);
 
   const overtimeData = safeKdsData;
@@ -304,7 +329,7 @@ export default function ChartsPanel({ trendData, kdsData, selectedPeriod, onPeri
         {/* 1. GELİR */}
         <div style={THEME.cardStyle}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px", alignItems:"center" }}>
-            <div><h3 style={THEME.titleStyle}>Gelir & Doluluk</h3></div>
+            <div><h3 style={THEME.titleStyle}>Kâr & Doluluk</h3></div>
             <div style={{ background: "rgba(0,0,0,0.2)", padding: "2px", borderRadius: "6px" }}>
               <button onClick={() => onPeriodChange(6)} style={getBtnStyle(6)}>6 Ay</button>
               <button onClick={() => onPeriodChange(12)} style={getBtnStyle(12)}>12 Ay</button>
@@ -319,7 +344,7 @@ export default function ChartsPanel({ trendData, kdsData, selectedPeriod, onPeri
                 <YAxis yAxisId="right" orientation="right" stroke={THEME.colors.textSub} tickLine={false} axisLine={false} unit="%" fontSize={10} width={30}/>
                 <Tooltip content={<CustomTooltip />} />
                 <Legend wrapperStyle={{ fontSize: "10px", bottom: 0 }} iconSize={8} />
-                <Line yAxisId="left" type="monotone" dataKey="revenue" name="Gelir" stroke={THEME.colors.danger} strokeWidth={2} dot={false} fill="url(#colorRevenue)" />
+                <Line yAxisId="left" type="monotone" dataKey="revenue" name="Kâr" stroke={THEME.colors.danger} strokeWidth={2} dot={false} fill="url(#colorRevenue)" />
                 <Line yAxisId="right" type="monotone" dataKey="occupancy" name="Doluluk" stroke={THEME.colors.success} strokeWidth={2} dot={false} fill="url(#colorOccupancy)" />
               </LineChart>
             </ResponsiveContainer>
@@ -413,7 +438,7 @@ export default function ChartsPanel({ trendData, kdsData, selectedPeriod, onPeri
                      <label style={{fontSize:'10px', color: THEME.colors.textMain}}>Doluluk Artışı</label>
                      <span style={{fontSize:'11px', color: isAiActive ? THEME.colors.ai : (occScenario > 0 ? THEME.colors.danger : THEME.colors.success), fontWeight:'700'}}>{occScenario > 0 ? `+${occScenario}%` : `${occScenario}%`} {isAiActive && '✨'}</span>
                   </div>
-                  <input type="range" min="-20" max="30" step="1" value={occScenario} onChange={(e) => setOccScenario(Number(e.target.value))} className={`kds-range-input ${isAiActive ? 'thumb-ai' : 'thumb-danger'}`} />
+                  <input type="range" min="-20" max="100" step="1" value={occScenario} onChange={(e) => setOccScenario(Number(e.target.value))} className={`kds-range-input ${isAiActive ? 'thumb-ai' : 'thumb-danger'}`} />
                 </div>
                 <div>
                   <div style={{display:'flex', justifyContent:'space-between', marginBottom:'4px'}}><label style={{fontSize:'10px', color: THEME.colors.textMain}}>Verimlilik</label><span style={{fontSize:'11px', color: THEME.colors.primary}}>%{prodTarget}</span></div>
@@ -469,7 +494,7 @@ export default function ChartsPanel({ trendData, kdsData, selectedPeriod, onPeri
               <div style={{ display:'flex', flexDirection:'column', gap:'12px', padding:'10px', background: `${THEME.colors.bgDark}80`, borderRadius:'8px', marginBottom:'12px' }}>
                  <div>
                    <div style={{display:'flex', justifyContent:'space-between', marginBottom:'4px'}}><label style={{fontSize:'10px', color: THEME.colors.textMain}}>Doluluk Senaryosu</label><span style={{fontSize:'11px', color: isAiActive ? THEME.colors.ai : THEME.colors.primary}}>{occScenario}% {isAiActive && '✨'}</span></div>
-                   <input type="range" min="-50" max="50" step="1" value={occScenario} onChange={(e) => setOccScenario(Number(e.target.value))} className={`kds-range-input ${isAiActive ? 'thumb-ai' : 'thumb-primary'}`} />
+                   <input type="range" min="-50" max="100" step="1" value={occScenario} onChange={(e) => setOccScenario(Number(e.target.value))} className={`kds-range-input ${isAiActive ? 'thumb-ai' : 'thumb-primary'}`} />
                  </div>
                  <div>
                    <div style={{display:'flex', justifyContent:'space-between', marginBottom:'4px'}}><label style={{fontSize:'10px', color: THEME.colors.textMain}}>Esnek İşgücü Oranı</label><span style={{fontSize:'11px', color: THEME.colors.warning}}>{flexibleRatio}%</span></div>
@@ -510,21 +535,115 @@ export default function ChartsPanel({ trendData, kdsData, selectedPeriod, onPeri
              {simMode === 'recruitment' ? (
                 <><strong>Sonuç:</strong> {gapValue} kişi {isHiring ? 'alım' : 'çıkarım'}. <strong>Hizmet Kalitesi:</strong> <span style={{color:qualityColor}}>{qualityText}</span></>
              ) : (
-                <><strong>Verimlilik:</strong> Esnek işgücü sayesinde <strong>₺{costSim.totalSaved.toLocaleString()}</strong> maliyet kurtarıldı.</>
+                <><strong>Verimlilik:</strong> Esnek işgücü sayesinde <strong>₺{costSim.saved.toLocaleString()}</strong> maliyet kurtarıldı.</>
              )}
          </div>
       </div>
 
+      {/* --- PROFESYONEL RAPOR TASARIMI (GİZLİ ALAN) --- */}
       <div style={{position:'absolute', left:'-9999px', top:0, width:'794px', background:'#fff', color:'#000', padding:'40px', fontFamily:'Arial, sans-serif'}} ref={reportRef}>
-        <div style={{borderBottom:'2px solid #333', paddingBottom:'20px', marginBottom:'30px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+        
+        {/* RAPOR BAŞLIK */}
+        <div style={{borderBottom:'3px solid #3b82f6', paddingBottom:'20px', marginBottom:'30px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
            <div>
-             <h1 style={{margin:0, fontSize:'24px', textTransform:'uppercase'}}>KDS Raporu: {simMode === 'recruitment' ? 'İşe Alım & Kalite' : 'Maliyet & Kapasite'}</h1>
-             <p style={{margin:'5px 0 0', color:'#555', fontSize:'14px'}}>Hilton İzmir - Yönetim Bilişim Sistemleri</p>
+             <h1 style={{margin:0, fontSize:'28px', color:'#1e293b', textTransform:'uppercase', letterSpacing:'1px'}}>Yönetici Karar Raporu</h1>
+             <p style={{margin:'5px 0 0', color:'#64748b', fontSize:'14px', fontWeight:'500'}}>Hilton İzmir - Stratejik Planlama & KDS</p>
            </div>
            <div style={{textAlign:'right'}}>
-             <div style={{fontSize:'12px', color:'#777'}}>Rapor Tarihi</div>
-             <div style={{fontWeight:'bold'}}>{new Date().toLocaleDateString()}</div>
+             <div style={{fontSize:'12px', color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.5px'}}>Rapor Tarihi</div>
+             <div style={{fontWeight:'700', fontSize:'16px', color:'#1e293b'}}>{new Date().toLocaleDateString('tr-TR', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
            </div>
+        </div>
+
+        {/* YÖNETİCİ ÖZETİ */}
+        <div style={{background:'#f8fafc', padding:'25px', borderRadius:'8px', border:'1px solid #e2e8f0', marginBottom:'30px'}}>
+            <h3 style={{margin:'0 0 15px 0', fontSize:'16px', color:'#0f172a', textTransform:'uppercase', borderBottom:'1px solid #cbd5e1', paddingBottom:'8px'}}>Yönetici Özeti: {simMode === 'recruitment' ? 'İşe Alım & Kalite' : 'Maliyet & Verimlilik'}</h3>
+            <div style={{display:'flex', justifyContent:'space-between', fontSize:'14px', color:'#334155'}}>
+                {simMode === 'recruitment' ? (
+                    <>
+                        <div>
+                            <strong>Simülasyon Parametreleri:</strong><br/>
+                            • Doluluk Artışı Beklentisi: <span style={{color: occScenario > 0 ? '#10b981' : '#ef4444'}}>%{occScenario}</span><br/>
+                            • Verimlilik Hedefi: %{prodTarget}<br/>
+                            • Ortalama Personel Maliyeti: ₺{avgCost.toLocaleString()}
+                        </div>
+                        <div style={{textAlign:'right'}}>
+                            <strong>Analiz Sonucu:</strong><br/>
+                            • Toplam İşgücü Açığı: <strong>{recruitmentSim.gapValue} Kişi</strong><br/>
+                            • Öngörülen Hizmet Kalitesi: <strong style={{color: recruitmentSim.quality >= 85 ? '#10b981' : '#ef4444'}}>{recruitmentSim.qualityText} (%{recruitmentSim.quality.toFixed(0)})</strong>
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <div>
+                            <strong>Simülasyon Parametreleri:</strong><br/>
+                            • Esnek İşgücü Oranı: %{flexibleRatio}<br/>
+                            • Mesai Maliyet Çarpanı: {overtimeMultiplier}x
+                        </div>
+                        <div style={{textAlign:'right'}}>
+                            <strong>Finansal Etki:</strong><br/>
+                            • Kurtarılan Maliyet (Verimlilik): <strong>₺{costSim.saved.toLocaleString()}</strong><br/>
+                            • Durum: <strong>{costSim.saved > 0 ? 'Pozitif Etki' : 'Nötr/Negatif'}</strong>
+                        </div>
+                    </>
+                )}
+            </div>
+        </div>
+
+        {/* DETAYLI TABLO */}
+        <h3 style={{margin:'0 0 15px 0', fontSize:'16px', color:'#0f172a', textTransform:'uppercase'}}>Departman Bazlı Detaylı Analiz</h3>
+        <table style={{width:'100%', borderCollapse:'collapse', fontSize:'12px', border:'1px solid #e2e8f0'}}>
+            <thead style={{background:'#1e293b', color:'#fff'}}>
+                <tr>
+                    <th style={{padding:'12px', textAlign:'left'}}>DEPARTMAN</th>
+                    <th style={{padding:'12px', textAlign:'center'}}>MEVCUT KADRO</th>
+                    <th style={{padding:'12px', textAlign:'center'}}>{simMode === 'recruitment' ? 'ÖNERİLEN KADRO' : 'GEREKEN KADRO'}</th>
+                    <th style={{padding:'12px', textAlign:'center'}}>{simMode === 'recruitment' ? 'FARK' : 'DURUM'}</th>
+                    <th style={{padding:'12px', textAlign:'right'}}>FİNANSAL ETKİ (Tahmini)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {simMode === 'recruitment' ? (
+                    recruitmentSim.depts.map((dept, i) => (
+                        <tr key={i} style={{borderBottom:'1px solid #e2e8f0', background: i % 2 === 0 ? '#fff' : '#f8fafc'}}>
+                            <td style={{padding:'10px', fontWeight:'600', color:'#334155'}}>{dept.name}</td>
+                            <td style={{padding:'10px', textAlign:'center', color:'#64748b'}}>{dept.mevcut}</td>
+                            <td style={{padding:'10px', textAlign:'center', fontWeight:'bold', color:'#0f172a'}}>{dept.onerilen}</td>
+                            <td style={{padding:'10px', textAlign:'center', fontWeight:'bold', color: dept.gap > 0 ? '#ef4444' : '#10b981'}}>
+                                {dept.gap > 0 ? `+${dept.gap} (Alım)` : dept.gap < 0 ? `${dept.gap} (Fazla)` : '-'}
+                            </td>
+                            <td style={{padding:'10px', textAlign:'right', color:'#334155'}}>
+                                ₺{(dept.onerilen * avgCost).toLocaleString()}
+                            </td>
+                        </tr>
+                    ))
+                ) : (
+                    costSim.details.map((dept, i) => (
+                        <tr key={i} style={{borderBottom:'1px solid #e2e8f0', background: i % 2 === 0 ? '#fff' : '#f8fafc'}}>
+                            <td style={{padding:'10px', fontWeight:'600', color:'#334155'}}>{dept.name}</td>
+                            <td style={{padding:'10px', textAlign:'center', color:'#64748b'}}>{dept.mevcut}</td>
+                            <td style={{padding:'10px', textAlign:'center', fontWeight:'bold', color:'#0f172a'}}>{dept.needed}</td>
+                            <td style={{padding:'10px', textAlign:'center', fontWeight:'bold', color: dept.status === 'Atıl' ? '#64748b' : dept.status === 'Mesai' ? '#f97316' : '#10b981'}}>
+                                {dept.status}
+                            </td>
+                            <td style={{padding:'10px', textAlign:'right', color:'#334155'}}>
+                                {dept.gap > 0 ? `Mesai Riski` : dept.gap < 0 ? `Atıl Kapasite` : 'Optimize'}
+                            </td>
+                        </tr>
+                    ))
+                )}
+            </tbody>
+        </table>
+
+        {/* FOOTER */}
+        <div style={{marginTop:'50px', borderTop:'1px solid #e2e8f0', paddingTop:'15px', display:'flex', justifyContent:'space-between', fontSize:'10px', color:'#94a3b8'}}>
+            <div>
+                Bu rapor Hilton KDS sistemi tarafından otomatik oluşturulmuştur.<br/>
+                Veriler anlık sistem kayıtlarına dayanmaktadır.
+            </div>
+            <div style={{textAlign:'right'}}>
+                Sayfa 1 / 1
+            </div>
         </div>
       </div>
     </div>
